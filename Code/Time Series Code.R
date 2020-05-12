@@ -11,6 +11,7 @@
 # not limited to:
 
 #   - Cumulative Sum (CuSum)  
+#   - Holts-Winters
 #   - ARIMA    
 
 
@@ -239,3 +240,136 @@ dev.off()
 
 # Based on the above analysis, it does not seem that the climate has gotten warmer
 # over time.
+
+
+
+########################################################################
+# Exponential Smoothing ------------------------------------------------
+######################################################################## 
+# Next, I will build and use an exponential smoothing model to help make a judgment of whether
+# the unofficial end of summer has gotten later over the 20 years.
+
+# Bring in packages
+suppressMessages(library("gridExtra"))
+suppressMessages(library("grid"))
+suppressMessages(library("ggfortify"))
+
+
+# Ensure randomness/reproducibility
+set.seed(123)
+
+# Create a time series object from the temperature values. We'll make the frequency of
+# our data be 123 days, which is the number of rows in our original data frame. We'll also
+# start our time series object from the first year (column) in our data frame.
+ts_vector <- ts(data = molten$value, # what are the actual data values?
+                frequency = nrow(data_temp_fixed), # how often is our data re-occuring?
+                start = as.integer(names(data_temp_fixed)[1])) # when does it start?
+summary(ts_vector)
+
+jpeg(file = "Atlanta Temperatures Over Time.jpeg") # Name of the file for the viz we'll save
+
+# A quick plot of our time series data shows, as we expected, seasonality in the temperature data.
+autoplot(ts_vector, # our time series object
+         ts.colour = "slateblue4", # color of the line,
+         main = "Atlanta Temperature over Time", # chart title
+         ylab = "Temperature (degrees F)" # name of y-axis
+         )
+dev.off()
+
+# Use Holt Winters to smooth the data. Set beta to false so we use exponential smoothing.
+# Gamma is set to true so we include a seasonal component.
+hw1 <- HoltWinters(ts_vector, beta = F, gamma = T) 
+summary(hw1)
+
+# Let's check out the fitted values
+# A multiple time series with one column for the filtered series as well as for 
+# the level, trend and seasonal components, estimated contemporaneously (that is 
+# at time t and not at the end of the series).
+head(hw1$fitted)
+head(hw1$coefficients)
+
+# Re-create our original plot, with the Holts-Winters estimated smoothing.
+plot_hw1 <- autoplot(hw1)
+autoplot(hw1, # our time series object
+         ts.colour = "slateblue4", # color of the line,
+         main = "Exponential Smoothing of Atlanta Temperature over Time", # chart title
+         ylab = "Temperature (degrees F)" # name of y-axis
+)
+# We can see the effects of the smoothing on the graph, namely in red
+
+
+# Create a matrix of all the seasonal factors for each data point.
+sf_matrix <- matrix(hw1$fitted[, 3], nrow = 123)
+sf_data <- as_tibble(sf_matrix)
+
+colnames(sf_data) <- colnames(data_temp_fixed[, 2:20])
+head(sf_data)
+
+
+# Create a matrix of all the estimated values (xhat) for each data point.
+xhat_matrix <- matrix(hw1$fitted[,1], nrow = 123)
+xhat_data <- as_tibble(xhat_matrix)
+
+# Change the column names
+colnames(xhat_data) <- colnames(data_temp_fixed[, 2:20])
+# Bring our dates back in
+xhat_data <- cbind(xhat_data, date = data_temp_fixed$date)
+head(xhat_data)
+
+# Let's melt our xhat data so we can graph it with our normal temperature data
+xhat_molten <- melt(xhat_data, id = "date")
+head(xhat_molten)
+# rename the column name for xhat
+colnames(xhat_molten)[3] <- "xhat_value"
+
+# Before we bring this data into our original melted data, we need to impute our values for 1996.
+data_1996 <- matrix(nrow = 123, ncol = 3)
+data_1996 <- as_tibble(data_1996)
+
+data_1996[, 1] <- as.Date(data_temp_fixed$date)
+colnames(data_1996)[1] <- colnames(xhat_molten)[1]
+
+data_1996[, 2] <- as.factor(1996)
+colnames(data_1996)[2] <- colnames(xhat_molten)[2]
+
+data_1996[, 3] <- data_temp_fixed$`1996`
+colnames(data_1996)[3] <- colnames(xhat_molten)[3]
+
+
+# Now let's bring this back into our original melted data frame so we can plot everything.
+combined_data <- xhat_molten %>%
+  rbind(data_1996) %>%
+  cbind(value = molten$value)
+
+jpeg(file = "Exponential Smoothing of Atlanta Temperatures (Holts-Winters).jpeg") # Name of the file for the viz we'll save
+
+# Let's look at the predicted and normal temperatures year-by-year.
+ggplot() +
+  # bring in our normal temperatures as points
+  geom_point(data = combined_data, 
+             aes(x = date, y = value), 
+             color = "gray", 
+             lwd = .75) +
+  # bring in our xhat values as a line with slight transparency so we can still see the points
+  geom_line(data = combined_data, 
+            aes(x = date, y = xhat_value), 
+            color = "slateblue", 
+            lwd = .75,
+            alpha = .5) +  
+  # Use the facet wrap function to create a separate graph, one for each year
+  facet_wrap(~ variable, nrow = 4) +
+  theme_classic() +
+  # Let's change the names of the axes and title
+  # for the title, let's pull the header of the column and only look at the last four digits
+  labs(title = "Temperatures in the Second Half of the Year",
+       subtitle = "Gray dots represent our original data.\nSlate blue lines represent exponential smoothing.") +
+  ylab("Temperature (degrees F") +
+  xlab("") +
+  # Center the title and format the subtitle/caption
+  theme(plot.title = element_text(hjust = 0, color = "black"),
+        plot.subtitle = element_text(color = "dark gray", size = 10))
+
+dev.off()
+# In general, we do not see a significant uptick in temperatures through the years,
+# even as predicted by Holts-Winter.Thus, we can not definitely say that the "end of
+# summer" has gone later in the season as time has progressed.
