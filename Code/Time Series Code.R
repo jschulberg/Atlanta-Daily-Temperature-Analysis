@@ -10,7 +10,7 @@
 # of time series change detection techniques to do so, including, but 
 # not limited to:
 
-#   - Cumulative Sum (CuSum)  
+#   - Cumulative Sum (CUSUM)  
 #   - Holts-Winters
 #   - ARIMA    
 
@@ -24,6 +24,7 @@ suppressMessages(library("tidyr")) # Used for data cleaning
 suppressMessages(library("ggplot2")) # Used for visualizations
 suppressMessages(library("stringr")) # Used for string manipulations
 suppressMessages(library("reshape2")) # Used for reshaping data
+suppressMessages(library("forecast")) # Used for various exponential smoothing models
 
 # bring in the data, delimited by a tab ("\t")
 data_temp <- read.delim(here::here("Data/temps.txt"), header = T, sep = "\t")
@@ -373,3 +374,55 @@ dev.off()
 # In general, we do not see a significant uptick in temperatures through the years,
 # even as predicted by Holts-Winter.Thus, we can not definitely say that the "end of
 # summer" has gone later in the season as time has progressed.
+
+
+
+########################################################################
+# ARIMA ----------------------------------------------------------------
+######################################################################## 
+# In this section, I will forecast future trends in Atlanta July-Oct. 
+# temperatures using an auto-regressive model called ARIMA. For more on
+# ARIMA, feel free to reference this website:
+# https://datascienceplus.com/time-series-analysis-using-arima-model-in-r/
+
+# ARIMA places more importance on the most recent temperature values rather 
+# than old ones. Although it's usually better to have more data, I'm going to
+# slice out the first 15 years-worth of data from our dataset so the visualizations 
+# don't look as messy.
+
+molten_sliced <- molten %>%
+  # change the variable column from a factor to a numeric (need to first convert it to a character
+  # because R is weird like that)
+  mutate(variable = round(as.numeric(as.character(variable)), 0)) %>%
+  # fix our date column to include the correct year
+  mutate(date = as.Date(paste(variable, # our year
+                              substr(date, 5, 10), # our month and day
+                              sep = ""))) %>%
+  # filter out the first 15 years of data
+  filter(variable > 2010)
+
+ts_vector_arima <- ts(data = molten_sliced$value, # what are the actual data values?
+                frequency = nrow(data_temp_fixed), # how often is our data re-occuring?
+                start = min(molten_sliced$variable)) # when does it start?
+summary(ts_vector_arima)
+
+# Create our time-series ARIMA object
+ts_arima <- auto.arima(ts_vector_arima)
+
+# Forecast and then plot
+arima_forecast <- forecast(ts_arima,
+                           level = c(95), # our confidence interval
+                           h = 500) # number of periods to forecast
+
+autoplot(arima_forecast, # our time series object
+         predict.colour = "slateblue4", # Change the color of the predicted line
+         predict.size = 1, # size of the prediction line
+         conf.int = T, # include the confidence interval
+         ts.colour = "slateblue1", # color of the line,
+         main = "Exponential Smoothing of Atlanta Temperature\nover Time Using ARIMA", # chart title
+         # sub = "This visualization only uses about 6 years\nworth of data to make projections",
+         ylab = "Temperature (degrees F)" # name of y-axis
+)
+
+# As the periods go on, we can see the confidence interval expanding, which is what
+# we would expect from time-series forecasts.
